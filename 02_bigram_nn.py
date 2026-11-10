@@ -67,4 +67,5 @@ for epoch in range(epochs):
 seconds = time.perf_counter() - begin
 print(seconds, len(train_data) * epochs / seconds)
 assert val_loss < 2.6, val_loss
-    
+learned_probs=F.softmax(model.table,dim=1)
+print(learned_probs[stoi['q'],stoi['u']].item())
