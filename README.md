@@ -30,3 +30,42 @@
 - **q → u 的概率**：01 是 0.898，02 是 0.9906。训练集里 q 出现 563 次，后面全是 u，真实频率 1.0；01 的 +1 平滑把它拉到 564 / 628 = 0.898，02 没有平滑，往 1.0 走。
 - **02 慢得多**：同样的结果，01 数表 0.28 秒，02 训练约 2 分钟。猜：时间主要花在 DataLoader 逐个样本取数据上，不在矩阵乘法上。
 - **bigram 的极限约 2.45**：只看前一个字符，再训也下不去；要更低得让模型看更长的上下文（下一步：注意力）。
+
+## 03 单头因果注意力（`03_single_head.py`）
+
+做法：字符 embedding + 位置 embedding（32 维）→ 一个注意力头（head_size 16，Q·K 除以 √16，下三角掩码填 -inf 再 softmax，乘 V）→ `lm_head` 出 65 个打分。SGD，lr 0.5，batch 32，block_size 8，1000 步。
+
+单批训练 loss 4.17 → 2.64。比 bigram 多看了前面最多 7 个字符，但只有一个头、没有 FFN 和残差。
+
+## `model.py`：GPT 的五个类
+
+`Head`（就是 03 的单头，包成类）→ `MultiHeadAttention`（多个头最后一维拼接，再过 `proj`）→ `FeedForward`（放大 4 倍、ReLU、缩回）→ `Block`（pre-LN + 残差：`x + attn(ln1(x))`，再 `x + ffn(ln2(x))`）→ `GPT`（两张 embedding 表 → n 个 Block → `ln_f` → `lm_head`）。
+
+调试配置（n_embd 32、n_head 4、n_layer 2、block_size 8）参数量 29761，和手算一致。`check_model.py` 检查每个类的输出形状、注意力权重每行和为 1、上三角为 0、参数量。
+
+故意改错：去掉因果掩码那一行，"每行和为 1"照样通过（softmax 总会把每行变成和为 1），停在"上三角为 0"那个 assert。只查行和查不出模型偷看后面的字符。
+
+## `train.py`：训练和生成
+
+AdamW，lr 0.001，batch 32。每 500 步（和最后一步）在训练集、验证集上各抽 20 批取平均 loss，评估在 `torch.no_grad()` 里做。
+
+| 配置 | 参数量 | 步数 | 训练 loss | 验证 loss |
+|---|---|---|---|---|
+| 调试（n_embd 32、n_head 4、n_layer 2、block_size 8） | 29761 | 1000 | 2.2863 | 2.2721 |
+| CPU 小配置（n_embd 128、n_head 4、n_layer 4、block_size 64） | 816705 | 2000 | 1.4941 | 1.6926 |
+
+CPU 小配置一路的验证 loss：500 步 1.9948，1000 步 1.8294，1500 步 1.7206，2000 步 1.6926。训练和验证的差距从 500 步的 0.08 拉大到 2000 步的 0.20，模型开始记住训练集的细节。单次运行，没计时；同样的代码在另一台机器（torch 2.15）上验证 loss 1.6912。
+
+生成：从一个换行符开始，每次只把最后 64 个字符交给模型（位置表只有 64 行，再长会越界），取最后一个位置的打分，softmax 后按概率抽一个字符接到后面，重复 300 次。开头一段：
+
+    Did, therefore, whends stops speece through;
+    To spreck'd yet me very.
+    Spaiv yield the not buge am lie, veing again'd
+    And you speech to be,
+
+    JULIET:
+    Had!
+
+学会了人名加冒号、换行、标点和常见短词，长单词多半是拼出来的：模型只按字符猜，没有"单词"的概念。
+
+故意改错：循环里去掉 `optimizer.zero_grad()`，程序不报错，但梯度一直累加，loss 卡在 2.9–3.3，1000 步后单批 3.24，被 `assert loss < 3.0` 拦下。
