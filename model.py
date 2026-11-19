@@ -28,3 +28,41 @@ class MultiHeadAttention(nn.Module):
     def forward(self,embedded_t):
         heads_out=torch.cat([head(embedded_t)for head in self.heads],dim=2)
         return self.proj(heads_out)
+
+class FeedForward(nn.Module):
+    def __init__(self, n_embd):
+        super().__init__()
+        self.up=nn.Linear(n_embd,4*n_embd)
+        self.down=nn.Linear(4*n_embd,n_embd)
+
+    def forward(self,hidden_t):
+        return self.down(torch.relu(self.up(hidden_t)))
+
+class Block(nn.Module):
+    def __init__(self,n_embd,n_head,block_size):
+        super().__init__()
+        self.attn=MultiHeadAttention(n_embd,n_head,block_size)
+        self.ffn=FeedForward(n_embd)
+        self.ln1=nn.LayerNorm(n_embd)
+        self.ln2=nn.LayerNorm(n_embd)
+
+    def forward(self,hidden_t):
+        hidden_t=hidden_t+self.attn(self.ln1(hidden_t))
+        hidden_t=hidden_t+self.ffn(self.ln2(hidden_t))
+        return hidden_t
+
+class GPT(nn.Module):
+    def __init__(self,vocab_size,n_embd,n_head,n_layer,block_size):
+        super().__init__()
+        self.tok_emb=nn.Embedding(vocab_size,n_embd)
+        self.pos_emb=nn.Embedding(block_size,n_embd)
+        self.blocks=nn.ModuleList([Block(n_embd,n_head,block_size)for _ in range(n_layer)])
+        self.ln_f=nn.LayerNorm(n_embd)
+        self.lm_head=nn.Linear(n_embd,vocab_size)
+
+    def forward(self,inputs_t):
+        T=inputs_t.shape[1]
+        hidden_t=self.tok_emb(inputs_t)+self.pos_emb(torch.arange(T))
+        for block in self.blocks:
+            hidden_t=block(hidden_t)
+        return self.lm_head(self.ln_f(hidden_t))
