@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from model import GPT
+import time
+device='cuda' if torch.cuda.is_available() else 'cpu'
+print(device)
 
 with open('data/input.txt',encoding='utf-8') as f:
     text=f.read()
@@ -24,7 +27,7 @@ def get_batch(data_t):
     starts_t=torch.randint(len(data_t)-block_size,(batch_size,))
     inputs_t=torch.stack([data_t[start:start+block_size]for start in starts_t])
     targets_t=torch.stack([data_t[start+1:start+block_size+1]for start in starts_t])
-    return inputs_t,targets_t
+    return inputs_t.to(device),targets_t.to(device)
 
 inputs_t,targets_t=get_batch(train_ids_t)
 print(inputs_t.shape,targets_t.shape)
@@ -34,7 +37,7 @@ assert inputs_t.shape==(batch_size,block_size),inputs_t.shape
 assert targets_t.shape==(batch_size,block_size),targets_t.shape
 assert (inputs_t[:,1:]==targets_t[:,:-1]).all()
 
-model=GPT(vocab_size,128,4,4,block_size)
+model=GPT(vocab_size,128,4,4,block_size).to(device)
 n_params=sum(p.numel()for p in model.parameters())
 assert n_params==816705,n_params
 logits_t=model(inputs_t)
@@ -58,6 +61,7 @@ def estimate_loss(data_t):
     return total/20
       
 batch_size=32
+start=time.perf_counter()
 for step in range(2000):
     inputs_t,targets_t=get_batch(train_ids_t)
     optimizer.zero_grad()
@@ -68,10 +72,11 @@ for step in range(2000):
         train_loss=estimate_loss(train_ids_t)
         val_loss=estimate_loss(val_ids_t)
         print(step,train_loss,val_loss)
+print('训练用时',time.perf_counter()-start)
 assert loss_t.item()<3.0,loss_t.item()
 assert val_loss>1.0 and val_loss<1.80,val_loss
 
-ids_t=torch.zeros((1,1),dtype=torch.int64)
+ids_t=torch.zeros((1,1),dtype=torch.int64,device=device)
 logits_t=model(ids_t)
 probs_t=F.softmax(logits_t[:,-1,:],dim=1)
 next_t=torch.multinomial(probs_t,num_samples=1)

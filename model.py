@@ -9,7 +9,7 @@ class Head(nn.Module):
         self.query=nn.Linear(n_embd,head_size,bias=False)
         self.key=nn.Linear(n_embd,head_size,bias=False)
         self.value=nn.Linear(n_embd,head_size,bias=False)
-        self.tril_t=torch.tril(torch.ones((block_size,block_size)))
+        self.register_buffer('tril_t',torch.tril(torch.ones((block_size,block_size))))
 
     def forward(self,embedded_t):
         T=embedded_t.shape[1]
@@ -62,7 +62,7 @@ class GPT(nn.Module):
 
     def forward(self,inputs_t):
         T=inputs_t.shape[1]
-        hidden_t=self.tok_emb(inputs_t)+self.pos_emb(torch.arange(T))
+        hidden_t=self.tok_emb(inputs_t)+self.pos_emb(torch.arange(T,device=inputs_t.device))
         for block in self.blocks:
             hidden_t=block(hidden_t)
         return self.lm_head(self.ln_f(hidden_t))
